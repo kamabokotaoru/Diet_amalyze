@@ -452,6 +452,20 @@ def index():
     return jsonify({"status": "ok", "service": "Diet Analyze Bot"})
 
 
+@app.route("/health")
+def health():
+    """詳細ヘルスチェック"""
+    has_token = bool(TELEGRAM_BOT_TOKEN)
+    has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
+    has_supabase = bool(os.environ.get("SUPABASE_URL"))
+    return jsonify({
+        "status": "ok",
+        "telegram_token": "set" if has_token else "MISSING",
+        "gemini_key": "set" if has_gemini else "MISSING",
+        "supabase_url": "set" if has_supabase else "MISSING",
+    })
+
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     """Telegram Webhook エンドポイント"""
@@ -478,27 +492,44 @@ def webhook():
 
 @app.route("/set_webhook", methods=["GET"])
 def set_webhook():
-    """Webhook URLを設定する（デプロイ後に1回アクセス）"""
-    # Render.comのURL（環境変数 RENDER_EXTERNAL_URL から取得）
-    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
-    if not render_url:
-        return jsonify({"error": "RENDER_EXTERNAL_URL が設定されていません"}), 400
+    """
+    Webhook URLを設定する（デプロイ後に1回アクセス）
+
+    使い方:
+      https://YOUR-APP.onrender.com/set_webhook?url=https://YOUR-APP.onrender.com
+    """
+    # クエリパラメータ or 環境変数 or Requestヘッダーから URL を取得
+    render_url = (
+        request.args.get("url")
+        or os.environ.get("RENDER_EXTERNAL_URL")
+        or request.host_url.rstrip("/")
+    )
+
+    if not render_url or "localhost" in render_url:
+        return jsonify({
+            "error": "URLを指定してください",
+            "usage": "GET /set_webhook?url=https://YOUR-APP.onrender.com",
+        }), 400
 
     webhook_url = f"{render_url}/webhook"
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-    async def setup():
-        bot = Bot(token=TELEGRAM_BOT_TOKEN)
-        await bot.set_webhook(url=webhook_url)
-        info = await bot.get_webhook_info()
-        return info.url
+        async def setup():
+            bot = Bot(token=TELEGRAM_BOT_TOKEN)
+            await bot.set_webhook(url=webhook_url)
+            info = await bot.get_webhook_info()
+            return info.url
 
-    result_url = loop.run_until_complete(setup())
-    loop.close()
+        result_url = loop.run_until_complete(setup())
+        loop.close()
 
-    return jsonify({"ok": True, "webhook_url": result_url})
+        return jsonify({"ok": True, "webhook_url": result_url})
+    except Exception as e:
+        logger.error(f"Webhook設定エラー: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # =============================================================
