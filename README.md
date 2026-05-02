@@ -51,7 +51,7 @@ iPhoneのTelegramから送信可能。Streamlitダッシュボードでデータ
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/YOUR_USERNAME/Diet_amalyze.git
+git clone https://github.com/kamabokotaoru/Diet_amalyze.git
 cd Diet_amalyze
 
 # 仮想環境を作成
