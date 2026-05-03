@@ -46,6 +46,8 @@ from database import (
     get_weekly_summary,
     get_recent_meals,
     get_meals_by_date,
+    delete_meal,
+    delete_last_meal,
 )
 from analyzer import analyze_meal, analyze_meal_image, format_meal_result, analyze_daily_summary, format_daily_summary
 
@@ -131,11 +133,17 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🍽️ 食事の記録方法:\n"
         "  テキストを送るだけ！\n"
         "  例: 「牛丼」「サラダとスープ」\n"
-        "  例: 「朝ごはんにトースト2枚と目玉焼き」\n\n"
+        "  例: 「朝 トースト2枚と目玉焼き」\n"
+        "  📸 写真を送信してもOK！\n\n"
         "📊 データ確認:\n"
         "  /today - 今日の食事と合計\n"
         "  /week - 直近7日間のカロリー推移\n"
-        "  /history - 直近10件の記録\n\n"
+        "  /history - 直近10件の記録\n"
+        "  /summary - 今日の食事総評（スコア付き）\n\n"
+        "🗑️ 記録の削除:\n"
+        "  /undo - 直前の記録を取消\n"
+        "  /delete - ID一覧を表示\n"
+        "  /delete 123 - 指定IDを削除\n\n"
         "⚙️ 設定変更:\n"
         "  /weight 65 - 体重を65kgに変更\n"
         "  /activity 低 - 活動量を変更 (低/中/高)\n"
@@ -423,6 +431,69 @@ async def cmd_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await processing_msg.edit_text(f"⚠️ 総評エラー: {str(e)[:200]}")
 
 
+async def cmd_undo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """直前の食事記録を取消する"""
+    user = update.effective_user
+
+    deleted = delete_last_meal(user.id)
+    if deleted:
+        name = deleted.get('food_name', '不明')
+        cal = deleted.get('calories', 0)
+        await update.message.reply_text(
+            f"🗑️ 直前の記録を削除しました:\n"
+            f"  {name} ({cal:,.0f} kcal)\n\n"
+            f"もう一度 /undo で更に前の記録も削除できます。"
+        )
+    else:
+        await update.message.reply_text("📋 削除する記録がありません。")
+
+
+async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    指定IDの記録を削除する。
+    引数なしで直近の記録一覧を表示。
+    """
+    user = update.effective_user
+
+    if context.args:
+        # IDが指定された場合 → 削除実行
+        try:
+            meal_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("⚠️ IDは数字で指定してください。\n例: /delete 123")
+            return
+
+        success = delete_meal(meal_id, user.id)
+        if success:
+            await update.message.reply_text(f"🗑️ ID {meal_id} の記録を削除しました。")
+        else:
+            await update.message.reply_text(
+                f"⚠️ ID {meal_id} の記録が見つかりません。\n"
+                f"/delete でID一覧を確認してください。"
+            )
+    else:
+        # 引数なし → 直近の記録を表示
+        meals = get_recent_meals(user.id, limit=10)
+        if not meals:
+            await update.message.reply_text("📋 削除する記録がありません。")
+            return
+
+        lines = [
+            "🗑️ 削除する記録のIDを指定してください\n",
+            "使い方: /delete [ID番号]\n",
+            "━━━━━━━━━━━━━━━",
+        ]
+        for meal in meals:
+            mid = meal.get('id', '?')
+            date = meal.get('date', '')
+            name = meal.get('food_name', '不明')
+            cal = meal.get('calories', 0)
+            lines.append(f"ID:{mid} | {date} | {name} ({cal:,.0f}kcal)")
+
+        lines.append("\n💡 直前の記録を消すには /undo が簡単です。")
+        await update.message.reply_text("\n".join(lines))
+
+
 # =============================================================
 # 写真メッセージハンドラー（画像から食事記録）
 # =============================================================
@@ -516,6 +587,8 @@ def get_telegram_app() -> Application:
         telegram_app.add_handler(CommandHandler("activity", cmd_activity))
         telegram_app.add_handler(CommandHandler("profile", cmd_profile))
         telegram_app.add_handler(CommandHandler("summary", cmd_summary))
+        telegram_app.add_handler(CommandHandler("undo", cmd_undo))
+        telegram_app.add_handler(CommandHandler("delete", cmd_delete))
 
         # テキストメッセージ → 食事記録
         telegram_app.add_handler(

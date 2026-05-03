@@ -175,6 +175,40 @@ def get_meals_by_date(telegram_user_id: int, date: str) -> list[dict]:
     return result.data
 
 
+def delete_meal(meal_id: int, telegram_user_id: int) -> bool:
+    """指定IDの食事記録を削除する（所有者チェック付き）"""
+    client = get_client()
+    result = (
+        client.table("meals")
+        .delete()
+        .eq("id", meal_id)
+        .eq("telegram_user_id", telegram_user_id)
+        .execute()
+    )
+    return len(result.data) > 0
+
+
+def delete_last_meal(telegram_user_id: int) -> dict | None:
+    """直近の食事記録を1件削除して、削除した記録を返す"""
+    client = get_client()
+    # 直近の記録を取得
+    last = (
+        client.table("meals")
+        .select("*")
+        .eq("telegram_user_id", telegram_user_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not last.data:
+        return None
+
+    meal = last.data[0]
+    # 削除
+    client.table("meals").delete().eq("id", meal["id"]).execute()
+    return meal
+
+
 def get_daily_summary(telegram_user_id: int, date: str) -> dict:
     """指定日の合計栄養素を計算する（全栄養素対応）"""
     meals = get_meals_by_date(telegram_user_id, date)
