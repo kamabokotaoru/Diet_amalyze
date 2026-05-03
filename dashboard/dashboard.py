@@ -6,16 +6,12 @@ Diet Analyze - Streamlit ダッシュボード
 """
 
 import os
-import sys
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-
-# プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Streamlit Cloud の Secrets から環境変数を設定
 if hasattr(st, "secrets"):
