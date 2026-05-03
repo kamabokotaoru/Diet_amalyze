@@ -23,15 +23,20 @@ if hasattr(st, "secrets"):
         if key in st.secrets:
             os.environ[key] = st.secrets[key]
 
-from database import (
-    get_all_meals_range,
-    get_all_user_profiles,
-    get_daily_summary,
-    get_meals_by_date,
-    delete_meal,
-)
-from config import calculate_daily_calories, calculate_bmr
-from analyzer import analyze_meal
+import traceback as _traceback
+
+_import_error = None
+try:
+    from database import (
+        get_all_meals_range,
+        get_all_user_profiles,
+        get_daily_summary,
+        get_meals_by_date,
+        delete_meal,
+    )
+    from analyzer import analyze_meal
+except Exception as _e:
+    _import_error = f"{type(_e).__name__}: {_e}\n\n{_traceback.format_exc()}"
 
 # ===== ページ設定 =====
 st.set_page_config(
@@ -40,6 +45,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+if _import_error:
+    st.error("Import failed — see details below")
+    st.code(_import_error, language="text")
+    st.stop()
 
 # ===== カスタムCSS =====
 st.markdown("""

@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta
-from supabase import create_client, Client
 
-# Supabase クライアント初期化
-_supabase_client: Client | None = None
+# Supabase クライアント初期化（遅延インポート）
+_supabase_client = None
 
 
-def get_client() -> Client:
+def get_client():
     """Supabase クライアントを取得する（シングルトン）"""
     global _supabase_client
     if _supabase_client is None:
+        from supabase import create_client
         url = os.environ.get("SUPABASE_URL", "")
         key = os.environ.get("SUPABASE_KEY", "")
         if not url or not key:
