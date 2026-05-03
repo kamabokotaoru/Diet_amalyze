@@ -237,24 +237,15 @@ with st.sidebar:
                     # ダッシュボードユーザーのプロファイルを作成
                     upsert_user_profile(0, username="dashboard", daily_calorie_target=target)
                     for item in result.items:
+                        item_dict = item.model_dump()
                         db_save(
                             telegram_user_id=profiles[0]["telegram_user_id"] if profiles else 0,
                             date=date_str,
                             original_text=manual_text,
-                            food_name=item.food_name,
-                            meal_type=item.meal_type,
-                            calories=item.calories,
-                            protein=item.protein,
-                            fat=item.fat,
-                            carbohydrates=item.carbohydrates,
-                            fiber=item.fiber,
-                            sugar=item.sugar,
-                            sodium=item.sodium,
-                            calcium=item.calcium,
-                            iron=item.iron,
-                            vitamin_a=item.vitamin_a,
-                            vitamin_c=item.vitamin_c,
-                            confidence=item.confidence,
+                            food_name=item_dict.pop("food_name"),
+                            meal_type=item_dict.pop("meal_type"),
+                            confidence=item_dict.pop("confidence"),
+                            **item_dict,
                         )
                     st.success(f"✅ {len(result.items)}品を記録しました！")
                     st.rerun()
@@ -278,21 +269,19 @@ tab_today, tab_trend, tab_records = st.tabs(["📊 今日のサマリー", "📈
 with tab_today:
     user_id = profiles[0]["telegram_user_id"] if profiles else None
 
+    empty_summary = {"meal_count": 0}
+    for _f in ["calories","protein","fat","carbs","fiber","sugar","sodium",
+               "calcium","iron","magnesium","zinc","potassium","salt_equivalent",
+               "vitamin_a","vitamin_b1","vitamin_b2","vitamin_b6","vitamin_b12",
+               "vitamin_c","vitamin_d","vitamin_e","vitamin_k","folate",
+               "saturated_fat","cholesterol","carbohydrates"]:
+        empty_summary[f"total_{_f}"] = 0
+
     try:
-        summary = get_daily_summary(user_id, date_str) if user_id else {
-            "meal_count": 0, "total_calories": 0, "total_protein": 0,
-            "total_fat": 0, "total_carbs": 0, "total_fiber": 0,
-            "total_sugar": 0, "total_sodium": 0, "total_calcium": 0,
-            "total_iron": 0, "total_vitamin_a": 0, "total_vitamin_c": 0,
-        }
+        summary = get_daily_summary(user_id, date_str) if user_id else empty_summary.copy()
         meals_today = get_meals_by_date(user_id, date_str) if user_id else []
     except Exception:
-        summary = {
-            "meal_count": 0, "total_calories": 0, "total_protein": 0,
-            "total_fat": 0, "total_carbs": 0, "total_fiber": 0,
-            "total_sugar": 0, "total_sodium": 0, "total_calcium": 0,
-            "total_iron": 0, "total_vitamin_a": 0, "total_vitamin_c": 0,
-        }
+        summary = empty_summary.copy()
         meals_today = []
 
     st.markdown(f"### 📅 {date_str}")
@@ -357,16 +346,29 @@ with tab_today:
             st.info("データがありません")
 
     with col_micro:
-        st.markdown("#### 🧪 微量栄養素")
+        st.markdown("#### 🧪 ビタミン・ミネラル")
         micro_data = {
-            "栄養素": ["食物繊維", "糖質", "ナトリウム", "カルシウム", "鉄分", "ビタミンA", "ビタミンC"],
-            "摂取量": [
-                summary["total_fiber"], summary["total_sugar"], summary["total_sodium"],
-                summary["total_calcium"], summary["total_iron"],
-                summary["total_vitamin_a"], summary["total_vitamin_c"],
+            "栄養素": [
+                "食物繊維", "食塩相当量",
+                "カルシウム", "鉄分", "マグネシウム", "亜鉛", "カリウム",
+                "ビタミンA", "ビタミンB1", "ビタミンB2", "ビタミンB6", "ビタミンB12",
+                "ビタミンC", "ビタミンD", "ビタミンE", "ビタミンK", "葉酸",
             ],
-            "単位": ["g", "g", "mg", "mg", "mg", "μg", "mg"],
-            "目安": [21, 50, 2000, 800, 7.5, 900, 100],  # 成人男性の目安
+            "摂取量": [
+                summary.get("total_fiber", 0), summary.get("total_salt_equivalent", 0),
+                summary.get("total_calcium", 0), summary.get("total_iron", 0),
+                summary.get("total_magnesium", 0), summary.get("total_zinc", 0),
+                summary.get("total_potassium", 0),
+                summary.get("total_vitamin_a", 0), summary.get("total_vitamin_b1", 0),
+                summary.get("total_vitamin_b2", 0), summary.get("total_vitamin_b6", 0),
+                summary.get("total_vitamin_b12", 0), summary.get("total_vitamin_c", 0),
+                summary.get("total_vitamin_d", 0), summary.get("total_vitamin_e", 0),
+                summary.get("total_vitamin_k", 0), summary.get("total_folate", 0),
+            ],
+            "単位": ["g", "g", "mg", "mg", "mg", "mg", "mg",
+                  "μg", "mg", "mg", "mg", "μg", "mg", "μg", "mg", "μg", "μg"],
+            "目安": [21, 7.5, 800, 7.5, 370, 11, 2500,
+                   900, 1.4, 1.6, 1.4, 2.4, 100, 8.5, 6.0, 150, 240],
         }
         df_micro = pd.DataFrame(micro_data)
         df_micro["達成率"] = (df_micro["摂取量"] / df_micro["目安"] * 100).round(0).astype(int).astype(str) + "%"
@@ -374,7 +376,7 @@ with tab_today:
         st.dataframe(
             df_micro[["栄養素", "表示", "目安", "達成率"]].set_index("栄養素"),
             use_container_width=True,
-            height=300,
+            height=500,
         )
 
     # 今日の食事リスト
@@ -518,24 +520,30 @@ with tab_records:
     if records:
         df_records = pd.DataFrame(records)
 
-        # 表示用カラムの整理
+        # 表示用カラムの整理（全栄養素対応）
         display_cols = [
             "date", "meal_type", "food_name", "calories",
-            "protein", "fat", "carbohydrates", "fiber", "confidence",
+            "protein", "fat", "carbohydrates", "fiber", "sugar",
+            "salt_equivalent", "calcium", "iron", "magnesium", "zinc", "potassium",
+            "vitamin_a", "vitamin_b1", "vitamin_b2", "vitamin_b6", "vitamin_b12",
+            "vitamin_c", "vitamin_d", "vitamin_e", "vitamin_k", "folate",
+            "confidence",
         ]
         available_cols = [c for c in display_cols if c in df_records.columns]
         df_display = df_records[available_cols].copy()
 
         # カラム名を日本語化
         rename_map = {
-            "date": "日付",
-            "meal_type": "食事タイプ",
-            "food_name": "食品名",
-            "calories": "カロリー(kcal)",
-            "protein": "タンパク質(g)",
-            "fat": "脂質(g)",
-            "carbohydrates": "炭水化物(g)",
-            "fiber": "食物繊維(g)",
+            "date": "日付", "meal_type": "食事", "food_name": "食品名",
+            "calories": "kcal", "protein": "P(g)", "fat": "F(g)",
+            "carbohydrates": "C(g)", "fiber": "繊維(g)", "sugar": "糖質(g)",
+            "salt_equivalent": "食塩(g)",
+            "calcium": "Ca(mg)", "iron": "Fe(mg)", "magnesium": "Mg(mg)",
+            "zinc": "Zn(mg)", "potassium": "K(mg)",
+            "vitamin_a": "VA(μg)", "vitamin_b1": "VB1", "vitamin_b2": "VB2",
+            "vitamin_b6": "VB6", "vitamin_b12": "VB12(μg)",
+            "vitamin_c": "VC(mg)", "vitamin_d": "VD(μg)",
+            "vitamin_e": "VE(mg)", "vitamin_k": "VK(μg)", "folate": "葉酸(μg)",
             "confidence": "信頼度",
         }
         df_display = df_display.rename(columns=rename_map)
