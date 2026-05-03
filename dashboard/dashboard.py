@@ -28,6 +28,7 @@ from database import (
     get_all_user_profiles,
     get_daily_summary,
     get_meals_by_date,
+    delete_meal,
 )
 from config import calculate_daily_calories, calculate_bmr
 from analyzer import analyze_meal
@@ -532,7 +533,41 @@ with tab_records:
     if records:
         df_records = pd.DataFrame(records)
 
-        # 表示用カラムの整理（全栄養素対応）
+        # --- 削除UI ---
+        st.markdown("#### 🗑️ 記録の削除")
+        # 削除候補のリストを作成
+        delete_options = {}
+        for _, row in df_records.iterrows():
+            rid = row.get("id", "?")
+            date_val = row.get("date", "")
+            name = row.get("food_name", "不明")
+            cal = row.get("calories", 0) or 0
+            label = f"ID:{rid} | {date_val} | {name} ({cal:,.0f} kcal)"
+            delete_options[label] = rid
+
+        selected = st.multiselect(
+            "削除する記録を選択",
+            options=list(delete_options.keys()),
+            placeholder="削除したい記録を選んでください...",
+        )
+
+        if selected:
+            if st.button(f"🗑️ {len(selected)} 件を削除する", type="primary"):
+                deleted_count = 0
+                for label in selected:
+                    meal_id = delete_options[label]
+                    uid = user_id or 0
+                    if delete_meal(meal_id, uid):
+                        deleted_count += 1
+                if deleted_count > 0:
+                    st.success(f"✅ {deleted_count} 件の記録を削除しました！")
+                    st.rerun()
+                else:
+                    st.error("⚠️ 削除に失敗しました。SupabaseのRLSポリシーを確認してください。")
+
+        st.markdown("---")
+
+        # --- テーブル表示 ---
         display_cols = [
             "date", "meal_type", "food_name", "calories",
             "protein", "fat", "carbohydrates", "fiber", "sugar",
@@ -544,7 +579,6 @@ with tab_records:
         available_cols = [c for c in display_cols if c in df_records.columns]
         df_display = df_records[available_cols].copy()
 
-        # カラム名を日本語化
         rename_map = {
             "date": "日付", "meal_type": "食事", "food_name": "食品名",
             "calories": "kcal", "protein": "P(g)", "fat": "F(g)",
@@ -560,7 +594,6 @@ with tab_records:
         }
         df_display = df_display.rename(columns=rename_map)
 
-        # 数値カラムを丸める
         for col in df_display.select_dtypes(include=["float64", "float32"]).columns:
             df_display[col] = df_display[col].round(1)
 
