@@ -171,6 +171,18 @@ def make_progress_bar(current: float, target: float, color: str = "#00E676") -> 
 
 with st.sidebar:
     st.markdown("# 🥗 Diet Analyze")
+
+    # 更新ボタン
+    if st.button("🔄 データを更新", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    # 自動更新（60秒ごと）
+    st.markdown(
+        """<meta http-equiv="refresh" content="60">""",
+        unsafe_allow_html=True,
+    )
+
     st.markdown("---")
 
     # 日付選択
