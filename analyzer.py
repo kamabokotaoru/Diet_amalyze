@@ -135,6 +135,29 @@ ANALYSIS_PROMPT = """あなたは日本の食品栄養データに精通した�
 {user_text}
 """
 
+IMAGE_ANALYSIS_PROMPT = """あなたは日本の食品栄養データに精通した栄養分析AIです（あすけんのような精度を目指します）。
+
+この食事の写真を分析し、写っている食品を特定して、日本食品標準成分表に基づいて栄養成分を推定してください。
+
+## ルール
+1. 写真に写っている食品をすべて個別に特定してください
+2. 量は写真から見た目で推定してください（皿のサイズ、盛り付け量を参考に）
+3. 料理名が分かる場合は日本語の一般的な名称を使用してください
+4. 栄養成分が不明な場合でも、類似食品から合理的に推定してください
+5. 食事タイミング: {meal_type}
+6. confidence（推定精度）は以下の基準で判定：
+   - 高: 明確に特定できる一般的な食品
+   - 中: 料理は特定できるが量や調理法に幅がある
+   - 低: 写真が不鮮明、または特殊な料理
+7. meal_comment には、この食事の栄養バランスについて具体的なアドバイスを2-3文で書いてください
+
+## 記録する栄養素（すべて必須）
+- 主要: カロリー、タンパク質、脂質、炭水化物、食物繊維、糖質、飽和脂肪酸、コレステロール、食塩相当量
+- ミネラル: カルシウム、鉄分、マグネシウム、亜鉛、カリウム
+- ビタミン: A、B1、B2、B6、B12、C、D、E、K、葉酸
+{caption_text}
+"""
+
 DAILY_SUMMARY_PROMPT = """あなたは管理栄養士のように、1日の食事を総合的に評価するAIです。
 
 以下の1日の食事記録を分析し、詳細な総評を行ってください。
@@ -178,6 +201,27 @@ def _get_client() -> genai.Client:
             raise ValueError("GEMINI_API_KEY が設定されていません")
         _client = genai.Client(api_key=api_key)
     return _client
+
+
+def _make_error_result(label: str, meal_type: str, error: str) -> MealAnalysis:
+    """分析エラー時のフォールバック結果を作成する"""
+    return MealAnalysis(
+        items=[
+            FoodItem(
+                food_name=label,
+                meal_type=meal_type or "食事",
+                calories=0, protein=0, fat=0, carbohydrates=0,
+                fiber=0, sugar=0, saturated_fat=0, cholesterol=0,
+                salt_equivalent=0, calcium=0, iron=0, magnesium=0,
+                zinc=0, potassium=0, vitamin_a=0, vitamin_b1=0,
+                vitamin_b2=0, vitamin_b6=0, vitamin_b12=0, vitamin_c=0,
+                vitamin_d=0, vitamin_e=0, vitamin_k=0, folate=0,
+                confidence="低",
+            )
+        ],
+        total_calories=0,
+        meal_comment=f"分析エラー: {error[:100]}",
+    )
 
 
 def analyze_meal(user_text: str, model: str = "gemini-2.5-flash") -> MealAnalysis:
@@ -233,23 +277,77 @@ def analyze_meal(user_text: str, model: str = "gemini-2.5-flash") -> MealAnalysi
 
     except Exception as e:
         logger.error(f"食事分析エラー: {e}")
-        return MealAnalysis(
-            items=[
-                FoodItem(
-                    food_name=user_text,
-                    meal_type=detected_type or "食事",
-                    calories=0, protein=0, fat=0, carbohydrates=0,
-                    fiber=0, sugar=0, saturated_fat=0, cholesterol=0,
-                    salt_equivalent=0, calcium=0, iron=0, magnesium=0,
-                    zinc=0, potassium=0, vitamin_a=0, vitamin_b1=0,
-                    vitamin_b2=0, vitamin_b6=0, vitamin_b12=0, vitamin_c=0,
-                    vitamin_d=0, vitamin_e=0, vitamin_k=0, folate=0,
-                    confidence="低",
-                )
-            ],
-            total_calories=0,
-            meal_comment=f"分析エラー: {str(e)[:100]}",
+        return _make_error_result(user_text, detected_type, str(e))
+
+
+def analyze_meal_image(
+    image_bytes: bytes,
+    mime_type: str = "image/jpeg",
+    caption: str = "",
+    model: str = "gemini-2.5-flash",
+) -> MealAnalysis:
+    """
+    食事の写真から栄養成分を分析する。
+
+    Args:
+        image_bytes: 画像のバイナリデータ
+        mime_type: 画像のMIMEタイプ (image/jpeg, image/png, etc.)
+        caption: ユーザーが写真と一緒に送ったテキスト（食事タイミング等）
+        model: 使用するGeminiモデル
+
+    Returns:
+        MealAnalysis: 構造化された分析結果
+    """
+    client = _get_client()
+
+    # キャプションから食事タイミングを検出
+    detected_type = detect_meal_type(caption) if caption else None
+    meal_type_hint = detected_type if detected_type else "不明（写真の内容から推定してください）"
+
+    # キャプション処理
+    caption_text = ""
+    if caption:
+        clean_caption = strip_meal_prefix(caption)
+        if clean_caption:
+            caption_text = f"\n## ユーザーからの補足:\n{clean_caption}"
+
+    prompt = IMAGE_ANALYSIS_PROMPT.format(
+        meal_type=meal_type_hint,
+        caption_text=caption_text,
+    )
+
+    try:
+        # 画像 + テキストを送信
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+
+        response = client.models.generate_content(
+            model=model,
+            contents=[image_part, prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=MealAnalysis,
+                temperature=0.3,
+            ),
         )
+
+        if response.parsed:
+            result = response.parsed
+        elif response.text:
+            data = json.loads(response.text)
+            result = MealAnalysis(**data)
+        else:
+            raise ValueError("Gemini API からの応答が空です")
+
+        # 検出した食事タイミングを上書き
+        if detected_type:
+            for item in result.items:
+                item.meal_type = detected_type
+
+        return result
+
+    except Exception as e:
+        logger.error(f"画像分析エラー: {e}")
+        return _make_error_result("写真の食事", detected_type, str(e))
 
 
 def analyze_daily_summary(

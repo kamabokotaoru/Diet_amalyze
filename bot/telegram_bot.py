@@ -47,7 +47,7 @@ from database import (
     get_recent_meals,
     get_meals_by_date,
 )
-from analyzer import analyze_meal, format_meal_result, analyze_daily_summary, format_daily_summary
+from analyzer import analyze_meal, analyze_meal_image, format_meal_result, analyze_daily_summary, format_daily_summary
 
 # ===== ログ設定 =====
 logging.basicConfig(
@@ -424,6 +424,69 @@ async def cmd_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =============================================================
+# 写真メッセージハンドラー（画像から食事記録）
+# =============================================================
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """写真メッセージを食事記録として処理する（Gemini Vision）"""
+    user = update.effective_user
+    caption = (update.message.caption or "").strip()
+
+    # 処理中メッセージ
+    processing_msg = await update.message.reply_text("📸 写真を分析中...")
+
+    try:
+        # プロファイル取得
+        profile = get_or_create_profile(user.id, user.username or "")
+        target = profile.get("daily_calorie_target", 2200)
+
+        # Telegramから写真をダウンロード（最大サイズを選択）
+        photo = update.message.photo[-1]  # 最大解像度
+        file = await context.bot.get_file(photo.file_id)
+        image_bytes = await file.download_as_bytearray()
+
+        # MIMEタイプを推定
+        mime_type = "image/jpeg"  # Telegramの写真はJPEG
+
+        # Gemini Vision APIで分析
+        analysis = analyze_meal_image(
+            image_bytes=bytes(image_bytes),
+            mime_type=mime_type,
+            caption=caption,
+        )
+
+        # 今日の日付（JST）
+        date = today_jst()
+
+        # 各食品をDBに保存
+        for item in analysis.items:
+            item_dict = item.model_dump()
+            save_meal(
+                telegram_user_id=user.id,
+                date=date,
+                original_text=caption or "📸 写真から記録",
+                food_name=item_dict.pop("food_name"),
+                meal_type=item_dict.pop("meal_type"),
+                confidence=item_dict.pop("confidence"),
+                **item_dict,
+            )
+
+        # 今日の合計を取得
+        daily = get_daily_summary(user.id, date)
+        daily_total_before = daily["total_calories"] - analysis.total_calories
+
+        # フォーマットして返信
+        result_text = "📸 " + format_meal_result(analysis, daily_total_before, target)
+        await processing_msg.edit_text(result_text)
+
+    except Exception as e:
+        logger.error(f"写真分析エラー: {e}", exc_info=True)
+        await processing_msg.edit_text(
+            f"⚠️ 写真の分析でエラーが発生しました:\n{str(e)[:200]}\n\nテキストで入力するか、もう一度お試しください。"
+        )
+
+
+# =============================================================
 # Flask + Telegram Application
 # =============================================================
 
@@ -457,6 +520,11 @@ def get_telegram_app() -> Application:
         # テキストメッセージ → 食事記録
         telegram_app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_meal_text)
+        )
+
+        # 写真 → 食事記録（画像分析）
+        telegram_app.add_handler(
+            MessageHandler(filters.PHOTO, handle_photo)
         )
 
     return telegram_app
