@@ -126,26 +126,24 @@ def upsert_user_profile(telegram_user_id: int, **kwargs) -> dict:
 # 食事記録操作
 # =============================================================
 
-def save_meal(
-    telegram_user_id: int,
-    date: str,
-    original_text: str,
-    food_name: str,
-    meal_type: str = "不明",
-    calories: float = 0,
-    protein: float = 0,
-    fat: float = 0,
-    carbohydrates: float = 0,
-    fiber: float = 0,
-    sugar: float = 0,
-    sodium: float = 0,
-    calcium: float = 0,
-    iron: float = 0,
-    vitamin_a: float = 0,
-    vitamin_c: float = 0,
-    confidence: str = "中",
-) -> dict:
-    """食事記録を保存する"""
+# 全栄養素フィールド名（save_meal / get_daily_summary で使用）
+NUTRIENT_FIELDS = [
+    "calories", "protein", "fat", "carbohydrates", "fiber", "sugar",
+    "saturated_fat", "cholesterol", "salt_equivalent",
+    "calcium", "iron", "magnesium", "zinc", "potassium",
+    "vitamin_a", "vitamin_b1", "vitamin_b2", "vitamin_b6", "vitamin_b12",
+    "vitamin_c", "vitamin_d", "vitamin_e", "vitamin_k", "folate",
+    "sodium",  # 後方互換
+]
+
+
+def save_meal(telegram_user_id: int, date: str, original_text: str,
+              food_name: str, meal_type: str = "不明", confidence: str = "中",
+              **nutrients) -> dict:
+    """
+    食事記録を保存する。
+    nutrients: calories, protein, fat, ... 等の栄養素をキーワード引数で受け取る。
+    """
     client = get_client()
     data = {
         "telegram_user_id": telegram_user_id,
@@ -153,19 +151,12 @@ def save_meal(
         "original_text": original_text,
         "food_name": food_name,
         "meal_type": meal_type,
-        "calories": calories,
-        "protein": protein,
-        "fat": fat,
-        "carbohydrates": carbohydrates,
-        "fiber": fiber,
-        "sugar": sugar,
-        "sodium": sodium,
-        "calcium": calcium,
-        "iron": iron,
-        "vitamin_a": vitamin_a,
-        "vitamin_c": vitamin_c,
         "confidence": confidence,
     }
+    # 存在する栄養素フィールドだけ追加
+    for field in NUTRIENT_FIELDS:
+        if field in nutrients:
+            data[field] = nutrients[field]
     result = client.table("meals").insert(data).execute()
     return result.data[0] if result.data else data
 
@@ -185,40 +176,25 @@ def get_meals_by_date(telegram_user_id: int, date: str) -> list[dict]:
 
 
 def get_daily_summary(telegram_user_id: int, date: str) -> dict:
-    """指定日の合計栄養素を計算する"""
+    """指定日の合計栄養素を計算する（全栄養素対応）"""
     meals = get_meals_by_date(telegram_user_id, date)
 
-    summary = {
-        "date": date,
-        "meal_count": len(meals),
-        "total_calories": 0,
-        "total_protein": 0,
-        "total_fat": 0,
-        "total_carbs": 0,
-        "total_fiber": 0,
-        "total_sugar": 0,
-        "total_sodium": 0,
-        "total_calcium": 0,
-        "total_iron": 0,
-        "total_vitamin_a": 0,
-        "total_vitamin_c": 0,
-    }
+    summary = {"date": date, "meal_count": len(meals)}
+
+    # 全栄養素フィールドの合計を初期化
+    for field in NUTRIENT_FIELDS:
+        summary[f"total_{field}"] = 0
+
+    # 後方互換のエイリアス
+    summary["total_carbs"] = 0
 
     for meal in meals:
-        summary["total_calories"] += meal.get("calories", 0) or 0
-        summary["total_protein"] += meal.get("protein", 0) or 0
-        summary["total_fat"] += meal.get("fat", 0) or 0
+        for field in NUTRIENT_FIELDS:
+            summary[f"total_{field}"] += meal.get(field, 0) or 0
         summary["total_carbs"] += meal.get("carbohydrates", 0) or 0
-        summary["total_fiber"] += meal.get("fiber", 0) or 0
-        summary["total_sugar"] += meal.get("sugar", 0) or 0
-        summary["total_sodium"] += meal.get("sodium", 0) or 0
-        summary["total_calcium"] += meal.get("calcium", 0) or 0
-        summary["total_iron"] += meal.get("iron", 0) or 0
-        summary["total_vitamin_a"] += meal.get("vitamin_a", 0) or 0
-        summary["total_vitamin_c"] += meal.get("vitamin_c", 0) or 0
 
     # 小数点1桁に丸める
-    for key in summary:
+    for key in list(summary.keys()):
         if key.startswith("total_"):
             summary[key] = round(summary[key], 1)
 

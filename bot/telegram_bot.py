@@ -47,7 +47,7 @@ from database import (
     get_recent_meals,
     get_meals_by_date,
 )
-from analyzer import analyze_meal, format_meal_result
+from analyzer import analyze_meal, format_meal_result, analyze_daily_summary, format_daily_summary
 
 # ===== ログ設定 =====
 logging.basicConfig(
@@ -369,26 +369,17 @@ async def handle_meal_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 今日の日付（JST）
         date = today_jst()
 
-        # 各食品をDBに保存
+        # 各食品をDBに保存（全栄養素をダイナミックに保存）
         for item in analysis.items:
+            item_dict = item.model_dump()
             save_meal(
                 telegram_user_id=user.id,
                 date=date,
                 original_text=user_text,
-                food_name=item.food_name,
-                meal_type=item.meal_type,
-                calories=item.calories,
-                protein=item.protein,
-                fat=item.fat,
-                carbohydrates=item.carbohydrates,
-                fiber=item.fiber,
-                sugar=item.sugar,
-                sodium=item.sodium,
-                calcium=item.calcium,
-                iron=item.iron,
-                vitamin_a=item.vitamin_a,
-                vitamin_c=item.vitamin_c,
-                confidence=item.confidence,
+                food_name=item_dict.pop("food_name"),
+                meal_type=item_dict.pop("meal_type"),
+                confidence=item_dict.pop("confidence"),
+                **item_dict,  # 残り全部が栄養素
             )
 
         # 今日の合計を取得
@@ -398,7 +389,6 @@ async def handle_meal_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # フォーマットして返信
         result_text = format_meal_result(analysis, daily_total_before, target)
 
-        # 処理中メッセージを編集
         await processing_msg.edit_text(result_text)
 
     except Exception as e:
@@ -406,6 +396,31 @@ async def handle_meal_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await processing_msg.edit_text(
             f"⚠️ エラーが発生しました:\n{str(e)[:200]}\n\nもう一度お試しください。"
         )
+
+
+async def cmd_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """今日の食事総評（1日の終わりに使用）"""
+    user = update.effective_user
+    profile = get_or_create_profile(user.id, user.username or "")
+    target = profile.get("daily_calorie_target", 2200)
+    date = today_jst()
+
+    meals = get_meals_by_date(user.id, date)
+    if not meals:
+        await update.message.reply_text(
+            f"📋 {date}\n\nまだ今日の食事が記録されていません。"
+        )
+        return
+
+    processing_msg = await update.message.reply_text("🔄 総評を作成中...")
+
+    try:
+        summary = analyze_daily_summary(meals, target)
+        result_text = format_daily_summary(summary, target)
+        await processing_msg.edit_text(result_text)
+    except Exception as e:
+        logger.error(f"総評エラー: {e}", exc_info=True)
+        await processing_msg.edit_text(f"⚠️ 総評エラー: {str(e)[:200]}")
 
 
 # =============================================================
@@ -437,6 +452,7 @@ def get_telegram_app() -> Application:
         telegram_app.add_handler(CommandHandler("weight", cmd_weight))
         telegram_app.add_handler(CommandHandler("activity", cmd_activity))
         telegram_app.add_handler(CommandHandler("profile", cmd_profile))
+        telegram_app.add_handler(CommandHandler("summary", cmd_summary))
 
         # テキストメッセージ → 食事記録
         telegram_app.add_handler(
