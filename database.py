@@ -177,19 +177,42 @@ def get_meals_by_date(telegram_user_id: int, date: str) -> list[dict]:
 
 def delete_meal(meal_id: int, telegram_user_id: int) -> bool:
     """指定IDの食事記録を削除する（所有者チェック付き）"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     client = get_client()
-    result = (
-        client.table("meals")
-        .delete()
-        .eq("id", meal_id)
-        .eq("telegram_user_id", telegram_user_id)
-        .execute()
-    )
-    return len(result.data) > 0
+    try:
+        result = (
+            client.table("meals")
+            .delete()
+            .eq("id", meal_id)
+            .eq("telegram_user_id", telegram_user_id)
+            .execute()
+        )
+        logger.info(f"delete_meal: id={meal_id}, result.data={result.data}")
+
+        # 削除されたか確認
+        check = (
+            client.table("meals")
+            .select("id")
+            .eq("id", meal_id)
+            .execute()
+        )
+        if check.data:
+            logger.error(f"delete_meal: id={meal_id} がまだ存在しています！")
+            return False
+
+        return True
+    except Exception as e:
+        logger.error(f"delete_meal エラー: {e}")
+        return False
 
 
 def delete_last_meal(telegram_user_id: int) -> dict | None:
     """直近の食事記録を1件削除して、削除した記録を返す"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     client = get_client()
     # 直近の記録を取得
     last = (
@@ -204,8 +227,34 @@ def delete_last_meal(telegram_user_id: int) -> dict | None:
         return None
 
     meal = last.data[0]
-    # 削除
-    client.table("meals").delete().eq("id", meal["id"]).execute()
+    meal_id = meal["id"]
+    logger.info(f"delete_last_meal: 削除対象 id={meal_id}, food={meal.get('food_name')}")
+
+    # 削除実行
+    try:
+        del_result = (
+            client.table("meals")
+            .delete()
+            .eq("id", meal_id)
+            .execute()
+        )
+        logger.info(f"delete_last_meal: delete result={del_result.data}")
+    except Exception as e:
+        logger.error(f"delete_last_meal: 削除実行エラー: {e}")
+        return None
+
+    # 削除確認
+    check = (
+        client.table("meals")
+        .select("id")
+        .eq("id", meal_id)
+        .execute()
+    )
+    if check.data:
+        logger.error(f"delete_last_meal: id={meal_id} がまだ存在！RLSポリシーを確認してください")
+        return None
+
+    logger.info(f"delete_last_meal: id={meal_id} の削除を確認完了")
     return meal
 
 

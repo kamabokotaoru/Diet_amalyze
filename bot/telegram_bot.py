@@ -435,17 +435,27 @@ async def cmd_undo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """直前の食事記録を取消する"""
     user = update.effective_user
 
-    deleted = delete_last_meal(user.id)
-    if deleted:
-        name = deleted.get('food_name', '不明')
-        cal = deleted.get('calories', 0)
-        await update.message.reply_text(
-            f"🗑️ 直前の記録を削除しました:\n"
-            f"  {name} ({cal:,.0f} kcal)\n\n"
-            f"もう一度 /undo で更に前の記録も削除できます。"
-        )
-    else:
-        await update.message.reply_text("📋 削除する記録がありません。")
+    try:
+        deleted = delete_last_meal(user.id)
+        if deleted:
+            name = deleted.get('food_name', '不明')
+            cal = deleted.get('calories', 0)
+            await update.message.reply_text(
+                f"🗑️ 直前の記録を削除しました:\n"
+                f"  {name} ({cal:,.0f} kcal)\n\n"
+                f"もう一度 /undo で更に前の記録も削除できます。"
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ 削除できませんでした。\n"
+                "記録がないか、データベースの権限設定を確認してください。\n\n"
+                "💡 Supabase SQL Editor で以下を実行してください:\n"
+                "DROP POLICY IF EXISTS allow_all_meals ON meals;\n"
+                "CREATE POLICY allow_all_meals ON meals FOR ALL USING (true) WITH CHECK (true);"
+            )
+    except Exception as e:
+        logger.error(f"undo エラー: {e}", exc_info=True)
+        await update.message.reply_text(f"⚠️ 削除エラー: {str(e)[:200]}")
 
 
 async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
