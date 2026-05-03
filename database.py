@@ -4,6 +4,8 @@ Diet Analyze - データベースモジュール
 Supabase PostgreSQL を使用して食事記録・ユーザープロファイルを管理する。
 """
 
+from __future__ import annotations
+
 import os
 from datetime import datetime, timedelta
 from supabase import create_client, Client

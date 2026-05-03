@@ -6,6 +6,8 @@ Gemini API を使用してテキストから食事内容を分析し、
 あすけんレベルの詳細な栄養素を記録。
 """
 
+from __future__ import annotations
+
 import os
 import json
 import logging
