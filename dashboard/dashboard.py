@@ -6,7 +6,11 @@ Diet Analyze - Streamlit ダッシュボード
 """
 
 import os
+import sys
 from datetime import datetime, timedelta, timezone
+
+# dashboard/ を sys.path の先頭に置き、ルートの同名モジュールより優先させる
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pandas as pd
 import plotly.express as px
